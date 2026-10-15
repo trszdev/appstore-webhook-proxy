@@ -7,104 +7,60 @@ const {
   getExternalBuildStateEmoji,
 } = require("./stateDescriptions");
 
-const { DateTime } = require("luxon");
+// Message body: "<emoji> <message type>: <current status>".
+// The status part is omitted for events that have no status.
+function formatBody(emoji, title, status) {
+  return status ? `${emoji} ${title}: ${status}` : `${emoji} ${title}`;
+}
 
-function formatTimestamp(iso) {
-  const timezone = process.env.TIMEZONE || "UTC";
-  const date = DateTime.fromISO(iso, { zone: "utc" }).setZone(timezone);
-  return date.toFormat("ccc, dd LLL yyyy HH:mm:ss ZZZZ");
+// `text` is the body (and the notification fallback). Optional context
+// elements (links) are rendered as a small line under it.
+function buildMessage(text, contextElements = []) {
+  if (contextElements.length === 0) return { text };
+
+  return {
+    text,
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text } },
+      { type: "context", elements: contextElements },
+    ],
+  };
 }
 
 function buildSlackMessage(payload) {
   const type = payload.data?.type || "unknown";
-  const rawTimestamp =
-    payload.data?.attributes?.timestamp || new Date().toISOString();
-  const timestamp = formatTimestamp(rawTimestamp);
 
   const APP_STORE_URL = process.env.APP_STORE_URL || null;
 
   const events = {
     appStoreVersionAppVersionStateUpdated: () => {
       const newValue = payload.data.attributes.newValue;
-      const oldValue = payload.data.attributes.oldValue;
-      const versionId = payload?.data?.relationships?.instance?.data?.id;
 
-      let blocks = [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "🚀 App Version Status Updated",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*${getStatusEmoji(newValue)} Current Status:*\n${getAppStoreStatusLabel(newValue)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Previous Status:*\n${getAppStoreStatusLabel(oldValue)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Timestamp:*\n${timestamp}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Version ID:*\n${versionId}`,
-            },
-          ],
-        },
-      ];
-
+      const elements = [];
       if (APP_STORE_URL) {
-        blocks.push({
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `<${APP_STORE_URL}|🔗 View on App Store>`,
-          },
+        elements.push({
+          type: "mrkdwn",
+          text: `<${APP_STORE_URL}|🔗 View on App Store>`,
         });
       }
 
-      return { blocks };
+      return buildMessage(
+        formatBody(
+          getStatusEmoji(newValue),
+          "App Version Status Updated",
+          getAppStoreStatusLabel(newValue)
+        ),
+        elements
+      );
     },
 
-    webhookPingCreated: () => ({
-      blocks: [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "🔄 Webhook Test Ping",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*Ping ID:*\n${payload.data.id}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Timestamp:*\n${timestamp}`,
-            },
-          ],
-        },
-      ],
-    }),
+    webhookPingCreated: () =>
+      buildMessage(formatBody("🔄", "Webhook Test Ping")),
 
     webhookPings: () => null,
 
     betaFeedbackScreenshotSubmissionCreated: () => {
       const feedbackId = payload.data.relationships?.instance?.data?.id;
-      const timestamp = formatTimestamp(payload.data.attributes.timestamp);
 
       const adamId = process.env.APP_ADAM_ID;
       const bundleId = process.env.APP_BUNDLE_ID;
@@ -130,43 +86,14 @@ function buildSlackMessage(payload) {
         });
       }
 
-      const blocks = [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "🧪 TestFlight Feedback Screenshot Submitted",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*Screenshot ID:*\n\`${feedbackId}\``,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Timestamp:*\n${timestamp}`,
-            },
-          ],
-        },
-      ];
-
-      if (elements.length > 0) {
-        blocks.push({
-          type: "context",
-          elements,
-        });
-      }
-
-      return { blocks };
+      return buildMessage(
+        formatBody("🧪", "TestFlight Feedback Screenshot Submitted"),
+        elements
+      );
     },
 
     betaFeedbackCrashSubmissionCreated: () => {
       const crashId = payload.data.relationships?.instance?.data?.id;
-      const timestamp = formatTimestamp(payload.data.attributes.timestamp);
 
       const adamId = process.env.APP_ADAM_ID;
 
@@ -181,154 +108,55 @@ function buildSlackMessage(payload) {
         });
       }
 
-      const blocks = [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "🐞 TestFlight Crash Feedback Submitted",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*Crash ID:*\n\`${crashId}\``,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Timestamp:*\n${timestamp}`,
-            },
-          ],
-        },
-      ];
-
-      if (elements.length > 0) {
-        blocks.push({
-          type: "context",
-          elements,
-        });
-      }
-
-      return { blocks };
+      return buildMessage(
+        formatBody("🐞", "TestFlight Crash Feedback Submitted"),
+        elements
+      );
     },
 
     buildUploadStateUpdated: () => {
       const newState = payload.data.attributes?.newState;
-      const oldState = payload.data.attributes?.oldState;
-      const uploadId = payload.data.relationships?.instance?.data?.id;
 
-      // This event has no timestamp -> fallback to "now" (we already do that above)
-      // timestamp var is already computed using rawTimestamp fallback
-
-      const blocks = [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "⬆️ App Store Build Upload Processed",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*${getBuildUploadStateEmoji(newState)} Current State:*\n${getBuildUploadStateLabel(newState)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Previous State:*\n${getBuildUploadStateLabel(oldState)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Upload ID:*\n\`${uploadId}\``,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Timestamp:*\n${timestamp}`,
-            },
-          ],
-        },
-      ];
-
-      return { blocks };
+      return buildMessage(
+        formatBody(
+          getBuildUploadStateEmoji(newState),
+          "App Store Build Upload Processed",
+          getBuildUploadStateLabel(newState)
+        )
+      );
     },
 
     buildBetaDetailExternalBuildStateUpdated: () => {
       const externalState =
         payload.data.attributes?.newExternalBuildState;
-      const buildBetaDetailsId =
-        payload.data.relationships?.instance?.data?.id;
-
-      const eventTimestampIso = payload.data.attributes?.timestamp;
-      const eventTimestamp = formatTimestamp(eventTimestampIso || rawTimestamp);
-
-      const blocks = [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: "📣 TestFlight External Availability Updated",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*${getExternalBuildStateEmoji(externalState)} External Status:*\n${getExternalBuildStateLabel(externalState)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Build Detail ID:*\n\`${buildBetaDetailsId}\``,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Timestamp:*\n${eventTimestamp}`,
-            },
-          ],
-        },
-      ];
 
       // Optional deep links (only if we want)
       // If we know adamId, we COULD build a link to that specific build in TestFlight QA dashboard,
       // but Apple doesn't give the build number or train here, so we skip to avoid broken links.
 
-      return { blocks };
+      return buildMessage(
+        formatBody(
+          getExternalBuildStateEmoji(externalState),
+          "TestFlight External Availability Updated",
+          getExternalBuildStateLabel(externalState)
+        )
+      );
     },
 
   };
 
+  const unhandledText = formatBody("📬", `Unhandled App Store Event: ${type}`);
+
   const template = events[type]?.() ?? {
+    text: unhandledText,
     blocks: [
-      {
-        type: "header",
-        text: {
-          type: "plain_text",
-          text: `📬 Unhandled App Store Event: ${type}`,
-          emoji: true,
-        },
-      },
+      { type: "section", text: { type: "mrkdwn", text: unhandledText } },
       {
         type: "section",
         text: {
           type: "mrkdwn",
           text: "```json\n" + JSON.stringify(payload, null, 2) + "\n```",
         },
-      },
-      {
-        type: "context",
-        elements: [
-          {
-            type: "mrkdwn",
-            text: `⏱️ *Timestamp:* ${timestamp}`,
-          },
-        ],
       },
     ],
   };
